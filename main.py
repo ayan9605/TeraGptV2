@@ -4,6 +4,7 @@ import threading
 import asyncio
 
 from pyrogram import enums, idle
+from pyrogram.errors import PeerIdInvalid
 from bot import app
 from health import create_health_app
 from config import Config
@@ -24,42 +25,71 @@ R_LOG_TXT = """<u><b>🚀 {bot_name} Restarted</b></u>
 
 _startup_done = False
 _channels_resolved = False
+_resolved_peers = {}
+
+
+def normalize_peer(peer):
+    if peer is None:
+        return None
+
+    if isinstance(peer, str):
+        peer = peer.strip()
+        if not peer:
+            return None
+        if peer.startswith("@"):
+            return peer
+        if peer.startswith("-100") or peer.startswith("-"):
+            try:
+                return int(peer)
+            except ValueError:
+                return peer
+        return peer
+
+    return peer
+
+
+async def resolve_peer(name, peer):
+    peer = normalize_peer(peer)
+
+    if not peer:
+        log.debug("%s not configured, skipping", name)
+        return None
+
+    try:
+        chat = await app.get_chat(peer)
+        title = getattr(chat, "title", None) or getattr(chat, "first_name", "Unknown")
+        resolved_id = getattr(chat, "id", peer)
+        _resolved_peers[name] = resolved_id
+        log.info("✅ %s resolved: %s (%s)", name, title, resolved_id)
+        return resolved_id
+
+    except PeerIdInvalid as e:
+        log.error("❌ %s (%s) failed to resolve: %s", name, peer, e)
+        log.error("   Try using @username instead of numeric ID in Config")
+        return None
+
+    except Exception as e:
+        log.error("❌ %s (%s) failed to resolve: %s", name, peer, e)
+        return None
 
 
 async def resolve_channels():
-    """Resolve all configured channel peers at startup."""
     global _channels_resolved
 
     if _channels_resolved:
         return
 
-    channels = {
-        "LOG_CHANNEL": Config.LOG_CHANNEL,
-        "ERROR_CHANNEL": Config.ERROR_CHANNEL,
-        "STORAGE_CHANNEL": Config.STORAGE_CHANNEL,
-        "PREMIUM_UPLOAD_CHANNEL": Config.PREMIUM_UPLOAD_CHANNEL,
-    }
-
     log.info("🔄 Resolving configured channels...")
 
-    for name, channel_id in channels.items():
-        if not channel_id or channel_id == 0:
-            log.debug("%s not configured, skipping", name)
-            continue
-
-        try:
-            chat = await app.get_chat(channel_id)
-            title = getattr(chat, "title", "Unknown")
-            log.info("✅ %s resolved: %s (%s)", name, title, channel_id)
-        except Exception as e:
-            log.error("❌ %s (%s) failed to resolve: %s", name, channel_id, e)
-            log.error("   Make sure bot is added as ADMIN to this channel")
+    await resolve_peer("LOG_CHANNEL", getattr(Config, "LOG_CHANNEL", None))
+    await resolve_peer("ERROR_CHANNEL", getattr(Config, "ERROR_CHANNEL", None))
+    await resolve_peer("STORAGE_CHANNEL", getattr(Config, "STORAGE_CHANNEL", None))
+    await resolve_peer("PREMIUM_UPLOAD_CHANNEL", getattr(Config, "PREMIUM_UPLOAD_CHANNEL", None))
 
     _channels_resolved = True
 
 
 async def send_startup_message():
-    """Send startup notification to log channel once."""
     global _startup_done
 
     if _startup_done:
@@ -73,9 +103,11 @@ async def send_startup_message():
         bot_username = f"@{me.username}" if getattr(me, "username", None) else "TeraBox Bot"
         msg = R_LOG_TXT.format(bot_name=bot_username)
 
-        if Config.LOG_CHANNEL:
+        log_channel = _resolved_peers.get("LOG_CHANNEL") or normalize_peer(getattr(Config, "LOG_CHANNEL", None))
+
+        if log_channel:
             await app.send_message(
-                chat_id=Config.LOG_CHANNEL,
+                chat_id=log_channel,
                 text=msg,
                 parse_mode=enums.ParseMode.HTML
             )
@@ -86,7 +118,7 @@ async def send_startup_message():
             except Exception as log_err:
                 log.warning("log_action failed: %s", log_err)
         else:
-            log.warning("LOG_CHANNEL is not configured, skipping startup message")
+            log.warning("LOG_CHANNEL is not configured or could not be resolved")
 
         _startup_done = True
 
@@ -99,10 +131,8 @@ async def main():
 
     async with app:
         log.info("✅ Pyrogram client started")
-
         await send_startup_message()
-
-        log.info("✅ Bot is now running and listening for updates...")
+        log.info("✅ Bot is now running and listening for updates")
         await idle()
 
 
