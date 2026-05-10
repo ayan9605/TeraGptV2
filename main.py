@@ -67,7 +67,6 @@ async def send_startup_message():
 
     try:
         await asyncio.sleep(2)
-
         await resolve_channels()
 
         me = await app.get_me()
@@ -83,10 +82,7 @@ async def send_startup_message():
             log.info("✅ Restart message sent to LOG_CHANNEL")
 
             try:
-                await log_action(
-                    "main.py",
-                    f"🚀 Bot restarted successfully: {bot_username}"
-                )
+                await log_action("main.py", f"🚀 Bot restarted successfully: {bot_username}")
             except Exception as log_err:
                 log.warning("log_action failed: %s", log_err)
         else:
@@ -99,19 +95,24 @@ async def send_startup_message():
 
 
 async def main():
-    """Main async runner for the bot."""
-    log.info("🔥 Pyrogram client initialized & handlers loaded!")
+    log.info("🔥 Pyrogram client initializing...")
 
-    await send_startup_message()
+    async with app:
+        log.info("✅ Pyrogram client started")
 
-    log.info("✅ Bot is now running and listening for updates...")
-    await idle()
+        await send_startup_message()
+
+        log.info("✅ Bot is now running and listening for updates...")
+        await idle()
+
+
+def run_bot():
+    app.run(main())
 
 
 def run_health_server():
-    """Run Flask health server in a background thread."""
     health_app = create_health_app()
-    health_app.run(host="0.0.0.0", port=8000)
+    health_app.run(host="0.0.0.0", port=8000, debug=False, use_reloader=False)
 
 
 if __name__ == "__main__":
@@ -119,4 +120,4 @@ if __name__ == "__main__":
     t.start()
     log.info("🌐 Health server started on port 8000")
 
-    app.run(main())
+    run_bot()
