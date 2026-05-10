@@ -2,6 +2,7 @@
 import logging
 import threading
 import asyncio
+from flask import Flask, jsonify  # ADDED
 from pyrogram import filters, enums
 from bot import app
 from health import create_health_app
@@ -20,6 +21,16 @@ R_LOG_TXT = """<u><b>🚀 {bot_name} Restarted</b></u>
 
 _startup_done = False
 _channels_resolved = False
+
+# ADDED DUMMY FLASK SERVER
+dummy_app = Flask(__name__)
+
+@dummy_app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "ok",
+        "bot": "running"
+    }), 200
 
 async def resolve_channels():
     """Resolve all configured channel peers at startup"""
@@ -98,9 +109,19 @@ def run_bot():
     app.run()
 
 if __name__ == "__main__":
-    # Start health server (Flask) in background thread
+    # Start existing health server (Flask) in background thread
     health_app = create_health_app()
-    t = threading.Thread(target=lambda: health_app.run(host="0.0.0.0", port=8000), daemon=True)
+    t = threading.Thread(
+        target=lambda: health_app.run(host="0.0.0.0", port=8000),
+        daemon=True
+    )
     t.start()
+
+    # START DUMMY FLASK SERVER
+    dummy_thread = threading.Thread(
+        target=lambda: dummy_app.run(host="0.0.0.0", port=8080),
+        daemon=True
+    )
+    dummy_thread.start()
 
     run_bot()
